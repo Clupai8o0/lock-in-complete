@@ -38,7 +38,7 @@ flowchart LR
         db[(SQLite)]
         orch --- db
         dash --- db
-        orch -.snapshot.json/cmd.json.- dash
+        orch -."snapshot.json/cmd.json".- dash
     end
 ```
 
