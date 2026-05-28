@@ -118,15 +118,20 @@ class Orchestrator:
                 asyncio.create_task(self._publish_loop(), name="publish"),
                 asyncio.create_task(self._watchdog_loop(), name="watchdog"),
             ]
+            # Wakes wait() the instant a shutdown is requested, even when
+            # every worker is parked on I/O (e.g. the mqtt bus blocked in
+            # `async for client.messages`, which `_stop` alone can't break).
+            # Cancelling the pending workers below is what unblocks them.
+            stop_task = asyncio.create_task(self._stop.wait(), name="stop")
             # Tell systemd we're alive (no-op outside systemd). Done after
             # all subsystems are constructed so the unit transitions to
             # "active" only when the FSM is genuinely usable.
             sd_notify.ready()
             done, pending = await asyncio.wait(
-                tasks, return_when=asyncio.FIRST_EXCEPTION
+                [*tasks, stop_task], return_when=asyncio.FIRST_COMPLETED
             )
             for t in done:
-                if t.exception():
+                if t is not stop_task and t.exception():
                     log.exception("task crashed: %s", t.get_name(), exc_info=t.exception())
             for t in pending:
                 t.cancel()
