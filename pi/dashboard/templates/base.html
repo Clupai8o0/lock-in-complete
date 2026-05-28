@@ -55,6 +55,18 @@
         <a href="/distractions" class="{{ 'active' if request.endpoint == 'distractions' }}">Distractions</a>
         <a href="/settings"     class="{{ 'active' if request.endpoint == 'settings' }}">Settings</a>
       </nav>
+      <button type="button" class="fs-btn" id="fs-btn" aria-label="Toggle fullscreen" title="Fullscreen">
+        <svg class="fs-icon fs-icon-enter" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"
+                fill="none" stroke="currentColor" stroke-width="2.2"
+                stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <svg class="fs-icon fs-icon-exit" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"
+                fill="none" stroke="currentColor" stroke-width="2.2"
+                stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
     </div>
   </header>
 
@@ -74,6 +86,56 @@
       [...body.classList].filter(c => c.startsWith('bean-state-')).forEach(c => body.classList.remove(c));
       body.classList.add(cls);
     };
+    // Hide the header when scrolling down, reveal when scrolling up.
+    (function () {
+      const header = document.querySelector('header');
+      if (!header) return;
+      const scroller = document.scrollingElement || document.documentElement;
+      let lastY = scroller.scrollTop;
+      let ticking = false;
+      const THRESHOLD = 8;
+      function update() {
+        const y = scroller.scrollTop;
+        const dy = y - lastY;
+        if (y <= 4) {
+          header.classList.remove('is-hidden');
+        } else if (dy > THRESHOLD) {
+          header.classList.add('is-hidden');
+        } else if (dy < -THRESHOLD) {
+          header.classList.remove('is-hidden');
+        }
+        if (Math.abs(dy) > THRESHOLD) lastY = y;
+        ticking = false;
+      }
+      window.addEventListener('scroll', () => {
+        if (!ticking) { requestAnimationFrame(update); ticking = true; }
+      }, { passive: true });
+    })();
+
+    // Fullscreen toggle — drops the browser chrome so the 5" DSI display has room to breathe.
+    (function () {
+      const btn = document.getElementById('fs-btn');
+      if (!btn) return;
+      const root = document.documentElement;
+      function inFullscreen() {
+        return !!(document.fullscreenElement || document.webkitFullscreenElement);
+      }
+      function sync() {
+        document.body.classList.toggle('is-fullscreen', inFullscreen());
+      }
+      btn.addEventListener('click', async () => {
+        try {
+          if (inFullscreen()) {
+            await (document.exitFullscreen?.() || document.webkitExitFullscreen?.());
+          } else {
+            await (root.requestFullscreen?.() || root.webkitRequestFullscreen?.());
+          }
+        } catch (e) { /* user gesture required, or unsupported — ignore */ }
+      });
+      document.addEventListener('fullscreenchange', sync);
+      document.addEventListener('webkitfullscreenchange', sync);
+    })();
+
     // Click the bean → happy jiggle.
     document.addEventListener('click', (e) => {
       const w = e.target.closest('.mascot-wrap');
