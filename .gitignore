@@ -23,3 +23,17 @@ esp32cam/**/build/
 .vscode/
 .idea/
 .DS_Store
+
+# LaTeX build artefacts (keep the .pdf)
+docs/*.tex
+docs/*.aux
+docs/*.log
+docs/*.fls
+docs/*.fdb_latexmk
+docs/*.out
+docs/*.synctex.gz
+docs/*.toc
+docs/*.lof
+docs/*.lot
+docs/*.bbl
+docs/*.blg
