@@ -1,0 +1,254 @@
+{% extends "base.html" %}
+{% block title %}Today &middot; Lock-In{% endblock %}
+{% block content %}
+<section class="focus-stage">
+  <div class="timer-card">
+    <div class="state-badge state-{{ snap.state|lower }}" id="state-badge">{{ snap.state }}</div>
+    <div class="ring-frame">
+      <div class="bean-speech" id="bean-speech"><span id="bean-tip"></span></div>
+      <div class="pomo-ring-wrap" id="pomo-ring-wrap">
+        <svg class="pomo-ring" viewBox="0 0 200 200" aria-hidden="true">
+          <circle class="pomo-ring-track" cx="100" cy="100" r="88"/>
+          <circle class="pomo-ring-fill pomo-ring-fill-base" cx="100" cy="100" r="88" pathLength="100"/>
+          <circle class="pomo-ring-fill pomo-ring-fill-low"  cx="100" cy="100" r="88" pathLength="100"/>
+        </svg>
+        <div class="mascot-wrap" id="hero-mascot" title="hi!">
+          {% include "_bean.html" %}
+        </div>
+        <div class="pomo-ring-center">
+          <div class="pomo-timer" id="pomo-timer">--:--</div>
+          <div class="pomo-timer-label" id="pomo-timer-label">pomodoro</div>
+        </div>
+      </div>
+    </div>
+    <div class="timer-meta">
+      <span>Today: <b id="today-focused">{{ snap.focused_seconds|duration }}</b></span>
+      <span>Target: <b id="today-target">{{ snap.target_pomodoros or 4 }}</b> pomodoros</span>
+    </div>
+  </div>
+
+  <aside class="stat-stack">
+    {# Focused — time + progress bar of focus-share #}
+    <div class="stat-card stat-focused">
+      <div class="label">Focused</div>
+      <div class="value" id="focused">{{ snap.focused_seconds|duration }}</div>
+      <div class="bar" aria-hidden="true"><div class="bar-fill" id="focus-pct-bar"></div></div>
+      <div class="meta"><b id="focus-pct">0</b>% of session</div>
+    </div>
+
+    {# Session — calmer, just total elapsed #}
+    <div class="stat-card stat-session">
+      <div class="label">Session</div>
+      <div class="value" id="total">{{ snap.total_seconds|duration }}</div>
+      <div class="meta">total elapsed</div>
+    </div>
+
+    {# Distractions — count + colored status (teal when 0, peach when >0) #}
+    <div class="stat-card stat-distractions" id="stat-distractions">
+      <div class="label">Distractions</div>
+      <div class="value" id="distractions">{{ snap.distraction_count }}</div>
+      <div class="meta" id="distractions-meta">{{ 'none yet, locked in' if snap.distraction_count == 0 else 'slip count' }}</div>
+    </div>
+
+    {# Pomodoros — dot indicator + done/target #}
+    <div class="stat-card stat-pomos">
+      <div class="label">Pomodoros</div>
+      <div class="pomo-dots" id="pomo-dots" aria-hidden="true"></div>
+      <div class="meta"><b id="pomos-done">{{ snap.break_count or 0 }}</b> of <b id="pomos-target">{{ snap.target_pomodoros or 4 }}</b></div>
+    </div>
+  </aside>
+</section>
+
+<section class="grid">
+  <div class="card controls">
+    <h3>Pomodoro</h3>
+    <div class="btn-row">
+      <button class="ctrl-btn ctrl-start" onclick="btn('single')">Start</button>
+      <button class="ctrl-btn ctrl-break" onclick="btn('double')">Break</button>
+      <button class="ctrl-btn ctrl-end"   onclick="btn('long')">End</button>
+    </div>
+    <div class="pomo-set-row">
+      <label class="pomo-set-label">Duration</label>
+      <input class="pomo-input" type="number" id="pomo-mins" min="1" max="120"
+             value="{{ ((snap.pomodoro_duration_s or 1500) / 60) | int }}">
+      <span class="pomo-set-label">min</span>
+      <button class="btn" onclick="savePomo()">Set</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>System</h3>
+    <ul class="kv">
+      <li><span>Arduino</span><b id="sys-arduino" class="{{ 'ok' if snap.serial_connected else 'err' }}">{{ 'connected' if snap.serial_connected else 'offline' }}</b></li>
+      <li><span>Camera</span><b id="sys-camera" class="{{ 'ok' if snap.camera_online else 'warn' }}">{{ 'online' if snap.camera_online else 'offline' }}</b></li>
+      <li><span>Vision</span><b id="sys-vision" class="{{ 'ok' if snap.vision_enabled else 'warn' }}">{{ 'enabled' if snap.vision_enabled else 'disabled' }}</b></li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3>Environment</h3>
+    {% set env = snap.last_environment %}
+    <ul class="kv">
+      <li><span>Temperature</span><b id="env-temp">{{ '%.1f' % env.temp_c ~ ' °C' if env and env.temp_c is not none else '-' }}</b></li>
+      <li><span>Humidity</span><b id="env-hum">{{ '%.0f' % env.humidity ~ ' %' if env and env.humidity is not none else '-' }}</b></li>
+      <li><span>Light</span><b id="env-light">{{ env.light if env and env.light is not none else '-' }}</b></li>
+      <li><span>Desk distance</span><b id="env-dist">{{ '%.0f' % snap.last_distance_cm ~ ' cm' if snap.last_distance_cm else '-' }}</b></li>
+    </ul>
+  </div>
+</section>
+
+<section class="card wide">
+  <h3>Latest vision observation</h3>
+  <p class="obs" id="obs">{{ snap.last_observation or 'No vision check yet.' }}</p>
+  <p class="meta" id="vision-meta">
+    {% if snap.last_vision_confidence is not none %}
+      confidence <b id="vision-conf">{{ '%.0f' % (snap.last_vision_confidence * 100) }}%</b>
+      &middot; judged
+      <b id="vision-judged" class="{{ 'ok' if snap.last_vision_focused else 'warn' }}">{{ 'focused' if snap.last_vision_focused else 'not focused' }}</b>
+    {% endif %}
+  </p>
+</section>
+
+<script>
+let pomoRemaining = null;
+let pomoTs = null;
+let pomoDuration = null;
+
+async function refresh() {
+  try {
+    const r = await fetch('/api/snapshot');
+    const s = await r.json();
+
+    if (window.setBeanState) window.setBeanState(s.state);
+
+    document.getElementById('focused').textContent = fmt(s.focused_seconds);
+    document.getElementById('total').textContent = fmt(s.total_seconds);
+    document.getElementById('distractions').textContent = s.distraction_count;
+    document.getElementById('today-focused').textContent = fmt(s.focused_seconds);
+    document.getElementById('today-target').textContent = s.target_pomodoros || 4;
+
+    // focused share of session — value + bar width
+    const focPct = (s.total_seconds > 0)
+      ? Math.max(0, Math.min(100, Math.round(s.focused_seconds / s.total_seconds * 100)))
+      : 0;
+    document.getElementById('focus-pct').textContent = focPct;
+    document.getElementById('focus-pct-bar').style.width = focPct + '%';
+
+    // distractions — colored status, friendly meta
+    const distCard = document.getElementById('stat-distractions');
+    const distMeta = document.getElementById('distractions-meta');
+    if ((s.distraction_count || 0) > 0) {
+      distCard.classList.add('has-slips');
+      const n = s.distraction_count;
+      distMeta.textContent = n === 1 ? '1 slip so far' : n + ' slips so far';
+    } else {
+      distCard.classList.remove('has-slips');
+      distMeta.textContent = 'none yet, locked in';
+    }
+
+    // pomodoros — render dots (target count, fill first N done)
+    const target = Math.max(1, s.target_pomodoros || 4);
+    const done   = Math.min(target, s.pomodoros_completed || s.break_count || 0);
+    const dotsBox = document.getElementById('pomo-dots');
+    if (dotsBox.children.length !== target) {
+      dotsBox.innerHTML = '';
+      for (let i = 0; i < target; i++) {
+        const d = document.createElement('span');
+        d.className = 'dot';
+        dotsBox.appendChild(d);
+      }
+    }
+    [...dotsBox.children].forEach((d, i) => d.classList.toggle('done', i < done));
+    document.getElementById('pomos-done').textContent = done;
+    document.getElementById('pomos-target').textContent = target;
+    const badge = document.querySelector('.state-badge');
+    badge.textContent = s.state;
+    badge.className = 'state-badge state-' + (s.state || 'unknown').toLowerCase();
+
+    if (s.pomodoro_remaining_s != null) {
+      pomoRemaining = s.pomodoro_remaining_s;
+      pomoTs = Date.now();
+      document.getElementById('pomo-timer-label').textContent = 'until break';
+    } else {
+      pomoRemaining = null;
+      document.getElementById('pomo-timer-label').textContent =
+        s.state === 'BREAK' ? 'on break' : 'pomodoro';
+    }
+    if (s.pomodoro_duration_s) {
+      pomoDuration = s.pomodoro_duration_s;
+      document.getElementById('pomo-mins').value = Math.round(s.pomodoro_duration_s / 60);
+    }
+
+    set('sys-arduino', s.serial_connected ? 'connected' : 'offline', s.serial_connected ? 'ok' : 'err');
+    set('sys-camera',  s.camera_online   ? 'online'    : 'offline', s.camera_online   ? 'ok' : 'warn');
+    set('sys-vision',  s.vision_enabled  ? 'enabled'   : 'disabled', s.vision_enabled  ? 'ok' : 'warn');
+
+    const env = s.last_environment || {};
+    document.getElementById('env-temp').textContent  = env.temp_c    != null ? env.temp_c.toFixed(1) + ' °C' : '-';
+    document.getElementById('env-hum').textContent   = env.humidity  != null ? Math.round(env.humidity) + ' %' : '-';
+    document.getElementById('env-light').textContent = env.light     != null ? env.light : '-';
+    document.getElementById('env-dist').textContent  = s.last_distance_cm != null ? Math.round(s.last_distance_cm) + ' cm' : '-';
+
+    document.getElementById('obs').textContent = s.last_observation || 'No vision check yet.';
+    if (s.last_vision_confidence != null) {
+      document.getElementById('vision-conf').textContent = Math.round(s.last_vision_confidence * 100) + '%';
+      set('vision-judged', s.last_vision_focused ? 'focused' : 'not focused', s.last_vision_focused ? 'ok' : 'warn');
+    }
+  } catch (e) { /* ignore network errors */ }
+}
+
+function tickTimer() {
+  const el = document.getElementById('pomo-timer');
+  const wrap = document.getElementById('pomo-ring-wrap');
+  const fills = wrap ? wrap.querySelectorAll('.pomo-ring-fill') : [];
+
+  if (pomoRemaining === null) {
+    el.textContent = '--:--';
+    if (wrap) wrap.classList.remove('is-low');
+    fills.forEach(f => f.style.strokeDashoffset = 100);
+    return;
+  }
+  const elapsed = (Date.now() - pomoTs) / 1000;
+  const rem = Math.max(0, pomoRemaining - elapsed);
+  const m = Math.floor(rem / 60);
+  const s = Math.floor(rem % 60);
+  el.textContent = String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+
+  const total = pomoDuration || pomoRemaining || 1;
+  const progress = Math.max(0, Math.min(1, rem / total));
+  const offset = (1 - progress) * 100;
+  fills.forEach(f => f.style.strokeDashoffset = offset);
+
+  if (wrap) wrap.classList.toggle('is-low', rem < 60 && rem > 0);
+}
+
+async function btn(action) {
+  await fetch('/api/button', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action})});
+}
+
+async function savePomo() {
+  const mins = parseFloat(document.getElementById('pomo-mins').value);
+  if (!mins || mins < 1) return;
+  await fetch('/api/settings', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({pomodoro_duration_s: mins * 60})});
+}
+
+function set(id, text, cls) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = text;
+  el.className = cls;
+}
+
+function fmt(sec) {
+  sec = sec || 0;
+  const h = Math.floor(sec/3600), m = Math.floor((sec%3600)/60), s = sec%60;
+  if (h) return `${h}h ${m}m`;
+  if (m) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+setInterval(refresh, 2000);
+setInterval(tickTimer, 500);
+refresh();
+</script>
+{% endblock %}

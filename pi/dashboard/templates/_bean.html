@@ -1,0 +1,48 @@
+<svg class="mascot" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  {# four body shapes — all roughly same size, eyes/mouth sit at the same coords on all #}
+  <path class="body shape-squircle" fill="url(#bean-grad-default)"
+        d="M 60 18 C 92 18 102 28 102 60 C 102 92 92 102 60 102 C 28 102 18 92 18 60 C 18 28 28 18 60 18 Z"/>
+  <path class="body shape-circle" fill="url(#bean-grad-default)"
+        d="M 18 60 A 42 42 0 1 0 102 60 A 42 42 0 1 0 18 60 Z"/>
+  <path class="body shape-hex" fill="url(#bean-grad-default)"
+        d="M 60 18 Q 78 18 92 33 Q 102 42 102 60 Q 102 78 92 87 Q 78 102 60 102 Q 42 102 28 87 Q 18 78 18 60 Q 18 42 28 33 Q 42 18 60 18 Z"/>
+  <path class="body shape-blob" fill="url(#bean-grad-default)"
+        d="M 60 16 C 90 16 104 38 102 64 C 100 90 86 104 60 104 C 34 104 20 90 18 64 C 16 38 30 16 60 16 Z"/>
+
+  <ellipse class="highlight" cx="44" cy="40" rx="11" ry="6" fill="rgba(253, 252, 248, 0.42)"/>
+
+  <g class="brow">
+    <path d="M 36 50 L 50 53" stroke="rgba(61, 64, 91, 0.6)" stroke-width="2.6" stroke-linecap="round"/>
+    <path d="M 84 53 L 70 50" stroke="rgba(61, 64, 91, 0.6)" stroke-width="2.6" stroke-linecap="round"/>
+  </g>
+
+  {# open eyes — iris in twilight_indigo, glint in tinted off-white #}
+  <g class="eyes-open">
+    <ellipse class="eye left"  cx="46" cy="63" rx="4.2" ry="5.6" fill="#3d405b"/>
+    <ellipse class="eye right" cx="74" cy="63" rx="4.2" ry="5.6" fill="#3d405b"/>
+    <circle cx="47.4" cy="61.4" r="1.2" fill="#fbf9ef"/>
+    <circle cx="75.4" cy="61.4" r="1.2" fill="#fbf9ef"/>
+  </g>
+
+  {# closed smile-eyes (^_^) — shown for BREAK/OFFLINE #}
+  <g class="eyes-smile">
+    <path d="M 40 64 Q 46 58 52 64" stroke="#3d405b" stroke-width="2.4" stroke-linecap="round" fill="none"/>
+    <path d="M 68 64 Q 74 58 80 64" stroke="#3d405b" stroke-width="2.4" stroke-linecap="round" fill="none"/>
+  </g>
+
+  <g class="blush">
+    <ellipse cx="36" cy="76" rx="5" ry="3" fill="rgba(224, 122, 95, 0.55)"/>
+    <ellipse cx="84" cy="76" rx="5" ry="3" fill="rgba(224, 122, 95, 0.55)"/>
+  </g>
+
+  <path class="mouth neutral"  d="M 52 80 Q 60 84 68 80" stroke="#3d405b" stroke-width="2.6" fill="none" stroke-linecap="round"/>
+  <path class="mouth smile"    d="M 50 78 Q 60 91 70 78" stroke="#3d405b" stroke-width="2.6" fill="none" stroke-linecap="round"/>
+  <path class="mouth worried"  d="M 52 85 Q 60 77 68 85" stroke="#3d405b" stroke-width="2.6" fill="none" stroke-linecap="round"/>
+  <path class="mouth relaxed"  d="M 54 82 Q 60 84 66 82" stroke="#3d405b" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+  <circle class="mouth tiny"   cx="60" cy="82" r="2" fill="#3d405b"/>
+
+  <g class="zzz" font-family="Inter, sans-serif" font-weight="700">
+    <text x="92" y="38" font-size="14" fill="rgba(61, 64, 91, 0.6)">z</text>
+    <text x="100" y="26" font-size="10" fill="rgba(61, 64, 91, 0.4)">z</text>
+  </g>
+</svg>

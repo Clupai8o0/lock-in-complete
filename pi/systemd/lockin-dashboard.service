@@ -1,0 +1,23 @@
+[Unit]
+Description=Lock-In Flask dashboard
+After=network-online.target lockin-orchestrator.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/lock-in/pi
+EnvironmentFile=/home/pi/lock-in/pi/.env
+ExecStart=/home/pi/lock-in/pi/.venv/bin/python dashboard/app.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

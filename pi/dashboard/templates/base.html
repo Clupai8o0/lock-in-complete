@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Lock-In{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="bean-state-{{ (snap.state if snap is defined and snap and snap.state else 'idle')|lower }}">
+
+  {# Shared gradient defs — referenced by all .mascot SVGs on the page #}
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="bean-grad-default" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%"  stop-color="#f4d5a4"/>
+        <stop offset="100%" stop-color="#f2cc8f"/>
+      </linearGradient>
+      <linearGradient id="bean-grad-focus" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%"  stop-color="#ffe066"/>
+        <stop offset="100%" stop-color="#f5c518"/>
+      </linearGradient>
+      <linearGradient id="bean-grad-warn" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%"  stop-color="#e79680"/>
+        <stop offset="100%" stop-color="#e07a5f"/>
+      </linearGradient>
+      <linearGradient id="bean-grad-break" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%"  stop-color="#9ac1ae"/>
+        <stop offset="100%" stop-color="#81b29a"/>
+      </linearGradient>
+      <linearGradient id="bean-grad-idle" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%"  stop-color="#f4d5a4"/>
+        <stop offset="100%" stop-color="#eaac48"/>
+      </linearGradient>
+      <linearGradient id="bean-grad-offline" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%"  stop-color="#d7502b"/>
+        <stop offset="100%" stop-color="#a23b1f"/>
+      </linearGradient>
+    </defs>
+  </svg>
+
+  <header>
+    <a class="brand" href="/">
+      <span class="mascot-wrap mascot-sm" aria-hidden="true">
+        {% include "_bean.html" %}
+      </span>
+      Lock-In
+    </a>
+    <div class="header-right">
+      <nav>
+        <a href="/"             class="{{ 'active' if request.endpoint == 'index' }}">Today</a>
+        <a href="/history"      class="{{ 'active' if request.endpoint == 'history' }}">History</a>
+        <a href="/distractions" class="{{ 'active' if request.endpoint == 'distractions' }}">Distractions</a>
+        <a href="/settings"     class="{{ 'active' if request.endpoint == 'settings' }}">Settings</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer>
+    Lock-In &middot; SIT210 &middot; built on existing kit
+  </footer>
+
+  <script>
+    // Reflect dashboard state on <body> so the bean's CSS picks the right expression.
+    window.setBeanState = function (state) {
+      const cls = 'bean-state-' + (state || 'idle').toLowerCase();
+      const body = document.body;
+      [...body.classList].filter(c => c.startsWith('bean-state-')).forEach(c => body.classList.remove(c));
+      body.classList.add(cls);
+    };
+    // Click the bean → happy jiggle.
+    document.addEventListener('click', (e) => {
+      const w = e.target.closest('.mascot-wrap');
+      if (!w) return;
+      w.classList.remove('is-happy');
+      void w.offsetWidth;
+      w.classList.add('is-happy');
+    });
+    // Bean speech bubble — drops random tips.
+    (function () {
+      const bubble = document.getElementById('bean-speech');
+      const tipEl  = document.getElementById('bean-tip');
+      if (!bubble || !tipEl) return;
+      const TIPS = [
+        "Sit up — your future spine will thank you.",
+        "Sip some water. Hydrate the brain.",
+        "Look at something 20 feet away for 20 seconds.",
+        "Stretch your shoulders.",
+        "Take a slow, deep breath.",
+        "Tiny step beats no step. Pick one.",
+        "Close one extra tab. You don't need it.",
+        "Phone face-down. You know it helps.",
+        "Almost there. Just keep moving.",
+        "You're allowed to take breaks.",
+        "Block one distraction, win the hour.",
+        "Note the next action. Then do it.",
+      ];
+      let shownIdx = -1;
+      function pickTip() {
+        let i = Math.floor(Math.random() * TIPS.length);
+        if (i === shownIdx) i = (i + 1) % TIPS.length;
+        shownIdx = i;
+        return TIPS[i];
+      }
+      function showTip() {
+        tipEl.textContent = pickTip();
+        bubble.classList.add('is-visible');
+        setTimeout(() => bubble.classList.remove('is-visible'), 6500);
+      }
+      setTimeout(showTip, 4000);
+      setInterval(showTip, 30000);
+    })();
+  </script>
+</body>
+</html>

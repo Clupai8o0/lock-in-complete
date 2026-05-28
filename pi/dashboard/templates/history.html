@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}History &middot; Lock-In{% endblock %}
+{% block content %}
+<section class="hero">
+  <h2>Last 7 days</h2>
+  <p class="meta">Longest single block: <b>{{ longest|duration }}</b></p>
+</section>
+
+<section class="card">
+  <h3>By day</h3>
+  <table>
+    <thead><tr><th>Day</th><th>Sessions</th><th>Focused</th><th>Total</th></tr></thead>
+    <tbody>
+      {% for d in days %}
+      <tr>
+        <td>{{ d.day }}</td>
+        <td>{{ d.sessions }}</td>
+        <td>{{ d.focused|duration }}</td>
+        <td>{{ d.total|duration }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4"><em>No sessions yet.</em></td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="card">
+  <h3>Sessions</h3>
+  <table>
+    <thead>
+      <tr><th>#</th><th>Start</th><th>End</th><th>Focused</th><th>Total</th><th>Distractions</th><th>Breaks</th></tr>
+    </thead>
+    <tbody>
+      {% for s in sessions %}
+      <tr>
+        <td>{{ s.id }}</td>
+        <td>{{ s.start_time }}</td>
+        <td>{{ s.end_time or '—' }}</td>
+        <td>{{ s.focused_seconds|duration }}</td>
+        <td>{{ s.total_seconds|duration }}</td>
+        <td>{{ s.distraction_count }}</td>
+        <td>{{ s.break_count or 0 }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7"><em>No sessions yet.</em></td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p><a class="btn" href="/api/export.csv">Download CSV (30 days)</a></p>
+</section>
+{% endblock %}

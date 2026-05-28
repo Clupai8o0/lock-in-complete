@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}Settings &middot; Lock-In{% endblock %}
+{% block content %}
+<section class="hero">
+  <h2>Settings</h2>
+</section>
+
+<section class="card">
+  <h3>Pomodoro &amp; break</h3>
+  <p class="meta">Changes apply immediately — no restart needed.</p>
+  <form class="settings-form" onsubmit="saveTiming(event)">
+    <div class="setting-row">
+      <label>Pomodoro length (min)</label>
+      <input type="number" name="pomodoro_duration_s" min="1" max="120"
+             value="{{ ((snap.pomodoro_duration_s or 1500) / 60) | int }}"
+             data-scale="60">
+    </div>
+    <div class="setting-row">
+      <label>Break length (min)</label>
+      <input type="number" name="break_to_idle_s" min="1" max="60"
+             value="{{ ((snap.break_duration_s or cfg.break_to_idle_s or 300) / 60) | round | int }}"
+             data-scale="60">
+    </div>
+    <div class="setting-row">
+      <label>Pomodoros per session</label>
+      <input type="number" name="target_pomodoros" min="1" max="20"
+             value="{{ snap.target_pomodoros or 4 }}">
+    </div>
+    <div class="setting-row setting-row-btn">
+      <button class="ctrl-btn ctrl-start" type="submit">Apply</button>
+      <span class="save-msg" id="save-msg"></span>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <h3>Advanced timing</h3>
+  <p class="meta">Tune presence detection &amp; state transitions.</p>
+  <form class="settings-form" onsubmit="saveTiming(event)">
+    <div class="setting-row">
+      <label>Focus confirm hold (s)</label>
+      <input type="number" name="focus_confirm_s" min="1" max="300"
+             value="{{ cfg.focus_confirm_s | int }}">
+    </div>
+    <div class="setting-row">
+      <label>Desk-away before degrading (s)</label>
+      <input type="number" name="desk_away_s" min="1" max="300"
+             value="{{ cfg.desk_away_s | int }}">
+    </div>
+    <div class="setting-row">
+      <label>Degrading → break (s)</label>
+      <input type="number" name="degrading_to_break_s" min="1" max="600"
+             value="{{ cfg.degrading_to_break_s | int }}">
+    </div>
+    <div class="setting-row">
+      <label>Away timeout (s)</label>
+      <input type="number" name="away_timeout_s" min="1" max="3600"
+             value="{{ cfg.away_timeout_s | int }}">
+    </div>
+    <div class="setting-row setting-row-btn">
+      <button class="ctrl-btn ctrl-start" type="submit">Apply</button>
+      <span class="save-msg" id="save-msg-adv"></span>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <h3>Read-only config</h3>
+  <ul class="kv">
+    <li><span>Vision interval</span><b>{{ cfg.vision_interval_s }} s</b></li>
+    <li><span>Image retention</span><b>{{ cfg.image_retention_days }} days</b></li>
+    <li><span>Camera URL</span><b><code>{{ cfg.camera_url }}</code></b></li>
+    <li><span>Gemini model</span><b><code>{{ cfg.gemini_model }}</code></b></li>
+  </ul>
+</section>
+
+<section class="card">
+  <h3>Runtime</h3>
+  <ul class="kv">
+    <li><span>State</span><b>{{ snap.state }}</b></li>
+    <li><span>Serial</span><b>{{ 'connected' if snap.serial_connected else 'offline' }}</b></li>
+    <li><span>Camera</span><b>{{ 'online' if snap.camera_online else 'offline' }}</b></li>
+    <li><span>Vision</span><b>{{ 'enabled' if snap.vision_enabled else 'disabled' }}</b></li>
+  </ul>
+</section>
+
+<script>
+async function saveTiming(e) {
+  e.preventDefault();
+  const form = e.target;
+  const payload = {};
+  for (const input of form.querySelectorAll('input[name]')) {
+    const scale = parseFloat(input.dataset.scale || '1');
+    payload[input.name] = parseFloat(input.value) * scale;
+  }
+  const res = await fetch('/api/settings', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload)
+  });
+  const msg = document.getElementById('save-msg');
+  msg.textContent = res.ok ? 'Saved.' : 'Error.';
+  msg.style.color = res.ok ? 'var(--accent)' : 'var(--err)';
+  setTimeout(() => { msg.textContent = ''; }, 3000);
+}
+</script>
+{% endblock %}

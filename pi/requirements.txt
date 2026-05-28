@@ -1,0 +1,6 @@
+pyserial>=3.5
+pyserial-asyncio>=0.6
+aiohttp>=3.9
+google-genai>=0.3.0
+python-dotenv>=1.0
+flask>=3.0

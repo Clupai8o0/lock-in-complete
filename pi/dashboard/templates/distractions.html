@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Distractions &middot; Lock-In{% endblock %}
+{% block content %}
+<section class="hero">
+  <h2>Distractions (last 7 days)</h2>
+  <p class="meta">Images are auto-purged after 7 days; observation text stays forever.</p>
+</section>
+
+<section class="gallery">
+  {% for d in items %}
+  <article class="card distraction">
+    {% if d.image_url %}
+      <a href="{{ d.image_url }}" target="_blank">
+        <img src="{{ d.image_url }}" alt="distraction snapshot" loading="lazy">
+      </a>
+    {% else %}
+      <div class="no-image">image purged</div>
+    {% endif %}
+    <p class="obs">{{ d.observation }}</p>
+    <p class="meta">
+      {{ d.timestamp }}
+      &middot; confidence <b>{{ '%.0f' % (d.confidence * 100) }}%</b>
+      {% if d.duration_seconds %} &middot; lasted {{ d.duration_seconds }}s{% endif %}
+    </p>
+  </article>
+  {% else %}
+  <p><em>No distractions recorded.</em></p>
+  {% endfor %}
+</section>
+{% endblock %}

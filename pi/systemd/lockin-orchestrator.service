@@ -1,0 +1,25 @@
+[Unit]
+Description=Lock-In orchestrator (Arduino + ESP32-CAM + Gemini + FSM)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/lock-in/pi
+EnvironmentFile=/home/pi/lock-in/pi/.env
+ExecStart=/home/pi/lock-in/pi/.venv/bin/python main.py
+Restart=always
+RestartSec=5
+WatchdogSec=120
+StandardOutput=journal
+StandardError=journal
+
+# basic hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

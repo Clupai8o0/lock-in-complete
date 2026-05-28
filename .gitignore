@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# Project data
+pi/data/
+pi/data/images/
+pi/data/snapshot.json
+pi/data/*.db
+pi/data/*.db-journal
+pi/data/*.db-wal
+pi/data/*.db-shm
+
+# Arduino build artefacts
+arduino/**/build/
+esp32cam/**/build/
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
