@@ -63,6 +63,12 @@ class Config:
     dashboard_host: str
     dashboard_port: int
 
+    # mqtt
+    mqtt_host: str
+    mqtt_port: int
+    mqtt_topic_snapshot: str
+    mqtt_topic_cmd: str
+
 
 def load() -> Config:
     db_path = Path(os.environ.get("DB_PATH", "./data/lockin.db"))
@@ -88,6 +94,10 @@ def load() -> Config:
         pomodoro_duration_s=_env_float("POMODORO_DURATION_S", 25 * 60),
         dashboard_host=os.environ.get("DASHBOARD_HOST", "0.0.0.0"),
         dashboard_port=_env_int("DASHBOARD_PORT", 8080),
+        mqtt_host=os.environ.get("MQTT_HOST", "127.0.0.1"),
+        mqtt_port=_env_int("MQTT_PORT", 1883),
+        mqtt_topic_snapshot=os.environ.get("MQTT_TOPIC_SNAPSHOT", "lockin/snapshot"),
+        mqtt_topic_cmd=os.environ.get("MQTT_TOPIC_CMD", "lockin/cmd"),
     )
     cfg.db_path.parent.mkdir(parents=True, exist_ok=True)
     cfg.image_dir.mkdir(parents=True, exist_ok=True)

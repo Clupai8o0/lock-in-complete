@@ -4,3 +4,5 @@ aiohttp>=3.9
 google-genai>=0.3.0
 python-dotenv>=1.0
 flask>=3.0
+aiomqtt>=2.0
+paho-mqtt>=2.0

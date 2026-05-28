@@ -115,11 +115,7 @@ let pomoRemaining = null;
 let pomoTs = null;
 let pomoDuration = null;
 
-async function refresh() {
-  try {
-    const r = await fetch('/api/snapshot');
-    const s = await r.json();
-
+function render(s) {
     if (window.setBeanState) window.setBeanState(s.state);
 
     document.getElementById('focused').textContent = fmt(s.focused_seconds);
@@ -195,7 +191,39 @@ async function refresh() {
       document.getElementById('vision-conf').textContent = Math.round(s.last_vision_confidence * 100) + '%';
       set('vision-judged', s.last_vision_focused ? 'focused' : 'not focused', s.last_vision_focused ? 'ok' : 'warn');
     }
-  } catch (e) { /* ignore network errors */ }
+}
+
+// Real-time push via Server-Sent Events (MQTT snapshot -> Flask -> browser).
+// Falls back to polling /api/snapshot if EventSource drops or isn't supported.
+let _es = null;
+let _pollTimer = null;
+
+function startPolling() {
+  if (_pollTimer) return;
+  _pollTimer = setInterval(async () => {
+    try {
+      const r = await fetch('/api/snapshot');
+      render(await r.json());
+    } catch (e) { /* ignore */ }
+  }, 2000);
+}
+
+function stopPolling() {
+  if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+}
+
+function startStream() {
+  if (!window.EventSource) { startPolling(); return; }
+  _es = new EventSource('/api/stream');
+  _es.onmessage = (ev) => {
+    stopPolling();               // stream is live, no need to poll
+    try { render(JSON.parse(ev.data)); } catch (e) { /* ignore */ }
+  };
+  _es.onerror = () => {
+    // Browser auto-reconnects the EventSource; meanwhile poll so the UI
+    // doesn't freeze if the broker/dashboard hiccups.
+    startPolling();
+  };
 }
 
 function tickTimer() {
@@ -248,8 +276,7 @@ function fmt(sec) {
   return `${s}s`;
 }
 
-setInterval(refresh, 2000);
 setInterval(tickTimer, 500);
-refresh();
+startStream();
 </script>
 {% endblock %}

@@ -31,6 +31,8 @@ from fsm import (
     State,
     VisionInput,
 )
+from mqtt_bus import MqttBus
+import sd_notify
 from serial_reader import SerialReader
 from vision_judge import VisionJudge
 
@@ -84,6 +86,15 @@ class Orchestrator:
         self._target_pomodoros: int = 4
         self._cmd_path = cfg.cmd_path
 
+        # MQTT bus: primary IPC with the dashboard. File-based cmd.json /
+        # snapshot.json still works when the broker is offline (graceful
+        # degradation — the dashboard's MqttBridge falls back automatically).
+        self.bus = MqttBus(cfg.mqtt_host, cfg.mqtt_port, client_id="lockin-orchestrator")
+        self.bus.subscribe(cfg.mqtt_topic_cmd)
+        self.bus.on_message(self._on_mqtt_message)
+        self._topic_snapshot = cfg.mqtt_topic_snapshot
+        self._topic_cmd = cfg.mqtt_topic_cmd
+
     # ----------------------------------------------------------------- run
 
 
@@ -103,7 +114,14 @@ class Orchestrator:
                 asyncio.create_task(self._tick_loop(), name="tick"),
                 asyncio.create_task(self._vision_loop(), name="vision"),
                 asyncio.create_task(self._retention_loop(), name="retention"),
+                asyncio.create_task(self.bus.run(), name="mqtt"),
+                asyncio.create_task(self._publish_loop(), name="publish"),
+                asyncio.create_task(self._watchdog_loop(), name="watchdog"),
             ]
+            # Tell systemd we're alive (no-op outside systemd). Done after
+            # all subsystems are constructed so the unit transitions to
+            # "active" only when the FSM is genuinely usable.
+            sd_notify.ready()
             done, pending = await asyncio.wait(
                 tasks, return_when=asyncio.FIRST_EXCEPTION
             )
@@ -114,10 +132,13 @@ class Orchestrator:
                 t.cancel()
             await asyncio.gather(*pending, return_exceptions=True)
             await self.serial.stop()
+            await self.bus.stop()
+            sd_notify.stopping()
 
     async def stop(self) -> None:
         self._stop.set()
         await self.serial.stop()
+        await self.bus.stop()
 
     # --------------------------------------------------------- serial input
     async def _serial_consumer(self) -> None:
@@ -286,6 +307,45 @@ class Orchestrator:
             return ""
         return str(path)
 
+    # ----------------------------------------------------- publish + watchdog
+    async def _publish_loop(self) -> None:
+        """Push the snapshot to MQTT at 2Hz with retain=True.
+
+        Retained messages mean a freshly connecting dashboard sees the
+        current state instantly instead of waiting for the next tick.
+        Silent no-op if the broker is offline; the file fallback in
+        main.py keeps the dashboard alive in that case.
+        """
+        while not self._stop.is_set():
+            await self._interruptible_sleep(0.5)
+            await self.bus.publish(self._topic_snapshot, self.snapshot(), retain=True)
+
+    async def _watchdog_loop(self) -> None:
+        """Feed the systemd watchdog every 30s (paired with WatchdogSec=120
+        in the unit file — three missed feeds trigger a restart)."""
+        while not self._stop.is_set():
+            sd_notify.watchdog()
+            await self._interruptible_sleep(30.0)
+
+    async def _on_mqtt_message(self, topic: str, payload: dict[str, Any]) -> None:
+        """Route an incoming MQTT command through the same code path as
+        the legacy cmd.json poller."""
+        if topic != self._topic_cmd:
+            return
+        log.info("mqtt cmd: %s", payload)
+        await self._dispatch_command(payload)
+
+    async def _dispatch_command(self, cmd: dict[str, Any]) -> None:
+        ctype = cmd.get("type")
+        if ctype == "button":
+            action = cmd.get("action", "single")
+            actions = self.fsm.on_button(action)
+            await self._apply_actions(actions)
+        elif ctype == "settings":
+            self._apply_settings({k: v for k, v in cmd.items() if k != "type"})
+        else:
+            log.warning("unknown command type: %s", ctype)
+
     # -------------------------------------------------------- retention loop
     async def _retention_loop(self) -> None:
         # one immediate pass, then every 12 hours
@@ -326,21 +386,17 @@ class Orchestrator:
             asyncio.create_task(self._apply_actions(actions))
 
     def _process_commands(self) -> None:
+        """File-based fallback for when MQTT is unavailable. Drained at the
+        1Hz tick rate; MQTT path delivers in single-digit ms when up."""
         try:
             if not self._cmd_path.exists():
                 return
             cmd = json.loads(self._cmd_path.read_text())
             self._cmd_path.unlink(missing_ok=True)
-            ctype = cmd.get("type")
-            if ctype == "button":
-                action = cmd.get("action", "single")
-                log.info("dashboard cmd: button %s", action)
-                actions = self.fsm.on_button(action)
-                asyncio.create_task(self._apply_actions(actions))
-            elif ctype == "settings":
-                self._apply_settings({k: v for k, v in cmd.items() if k != "type"})
+            log.info("file cmd: %s", cmd)
+            asyncio.create_task(self._dispatch_command(cmd))
         except Exception as e:
-            log.warning("command processing failed: %s", e)
+            log.warning("command file processing failed: %s", e)
 
     def _apply_settings(self, payload: dict[str, Any]) -> None:
         fsm_cfg_keys = (

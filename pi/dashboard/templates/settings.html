@@ -81,6 +81,7 @@
     <li><span>Serial</span><b>{{ 'connected' if snap.serial_connected else 'offline' }}</b></li>
     <li><span>Camera</span><b>{{ 'online' if snap.camera_online else 'offline' }}</b></li>
     <li><span>Vision</span><b>{{ 'enabled' if snap.vision_enabled else 'disabled' }}</b></li>
+    <li><span>MQTT broker</span><b>{{ 'connected (' ~ cfg.mqtt_host ~ ':' ~ cfg.mqtt_port ~ ')' if cfg.mqtt_connected else 'offline — file fallback' }}</b></li>
   </ul>
 </section>
 

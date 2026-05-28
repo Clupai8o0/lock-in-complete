@@ -27,9 +27,10 @@ flowchart LR
         vis["vision_judge.py"]
         cam["camera_client.py"]
         db[("SQLite<br/>lockin.db")]
-        snap[/"snapshot.json"/]
-        cmd[/"cmd.json"/]
-        dash["dashboard/app.py<br/>(Flask)"]
+        broker[("mosquitto<br/>MQTT broker")]
+        snap[/"snapshot.json<br/>(fallback)"/]
+        cmd[/"cmd.json<br/>(fallback)"/]
+        dash["dashboard/app.py<br/>(Flask + SSE)"]
     end
 
     subgraph Mac["Mac (LAN)"]
@@ -45,16 +46,20 @@ flowchart LR
     orch --> fsm
     fsm --> orch
     orch --> db
-    orch --> snap
+    orch -->|"publish lockin/snapshot<br/>(retain)"| broker
+    orch -->|"snapshot.json<br/>(fallback)"| snap
     orch --> cam
     cam <-->|"HTTP /capture"| webcam
     orch --> vis
     vis <-->|"HTTPS"| gemini
-    cmd --> orch
-    dash --> cmd
-    dash --> snap
+    broker -->|"subscribe lockin/cmd"| orch
+    dash -->|"publish lockin/cmd"| broker
+    broker -->|"subscribe lockin/snapshot"| dash
+    cmd -.->|"fallback"| orch
+    dash -.->|"fallback"| cmd
+    dash -.->|"fallback"| snap
     dash --> db
-    user(["User browser"]) -->|"HTTP :8080"| dash
+    user(["User browser"]) <-->|"HTTP :8080<br/>+ SSE /api/stream"| dash
 ```
 
 Key points:
@@ -62,9 +67,15 @@ Key points:
 - **One FSM, many inputs.** Serial frames, vision judgments, button events,
   and dashboard commands all funnel into a single `FocusFsm` instance. Nothing
   else owns state.
-- **Files as IPC.** The orchestrator writes `snapshot.json` once per second;
-  the dashboard reads it. The dashboard writes `cmd.json` to request
-  state changes; the orchestrator drains it. No shared memory, no socket.
+- **MQTT as primary IPC.** The orchestrator publishes the snapshot to
+  `lockin/snapshot` (retained, ~2 Hz) and subscribes to `lockin/cmd`. The
+  dashboard mirrors that: subscribes to the snapshot, publishes commands. The
+  browser gets pushed updates over Server-Sent Events (`/api/stream`), so a
+  state change shows up in well under a second.
+- **Files as fallback IPC.** If mosquitto is unreachable, the orchestrator
+  still writes `snapshot.json` and still drains `cmd.json`; the dashboard reads
+  the file and writes commands to it, and the browser falls back to polling.
+  The system degrades from real-time to ~1–2 s latency but never breaks.
 - **Vision is a sensor, not an oracle.** A failed Gemini call (timeout,
   bad JSON, network) is a no-op for the cycle. The FSM still ticks.
 
@@ -73,7 +84,7 @@ Key points:
 ```mermaid
 flowchart TB
     main["main.py<br/>asyncio.run(amain)"]
-    snap_task["snapshot_writer<br/>(1 Hz)"]
+    snap_task["snapshot_writer<br/>(file fallback, 1 Hz)"]
     orch_run["Orchestrator.run()"]
 
     main --> snap_task
@@ -84,11 +95,16 @@ flowchart TB
     orch_run --> t_tick["tick<br/>(1 Hz)<br/>FSM.tick()"]
     orch_run --> t_vision["vision<br/>(every<br/>VISION_INTERVAL_S)"]
     orch_run --> t_retention["retention<br/>(12 h)"]
+    orch_run --> t_mqtt["mqtt<br/>MqttBus.run()<br/>(reconnecting)"]
+    orch_run --> t_publish["publish<br/>(2 Hz snapshot)"]
+    orch_run --> t_watchdog["watchdog<br/>(sd_notify, 30 s)"]
 ```
 
-Tasks are started with `asyncio.create_task` and awaited together with
+Eight tasks are started with `asyncio.create_task` and awaited together with
 `asyncio.wait(..., return_when=FIRST_EXCEPTION)`. If any one task crashes,
 the others get cancelled, the loop unwinds, and systemd restarts the process.
+The `watchdog` task pings systemd every 30 s; if the whole loop deadlocks the
+pings stop and systemd kills + restarts after `WatchdogSec=120`.
 
 ## 3. Vision cycle sequence
 
@@ -176,24 +192,39 @@ in their `notes` column.
 
 | Port | Process            | Role                                    |
 |------|--------------------|-----------------------------------------|
-| 8080 | dashboard (Pi)     | HTTP — Flask dashboard + JSON APIs      |
+| 8080 | dashboard (Pi)     | HTTP — Flask dashboard + JSON APIs + SSE |
 | 8081 | mac_camera_server  | HTTP — `/capture` returns image/jpeg    |
+| 1883 | mosquitto (Pi)     | MQTT — `lockin/snapshot`, `lockin/cmd`  |
 | USB  | Arduino ↔ Pi       | 115200 baud, newline-delimited JSON     |
 | 443  | Pi → Gemini        | HTTPS — `generativelanguage.googleapis.com` |
 
+### MQTT topics
+
+| Topic             | Publisher    | Subscriber   | Payload                          | Retain |
+|-------------------|--------------|--------------|----------------------------------|--------|
+| `lockin/snapshot` | orchestrator | dashboard    | full snapshot JSON (~2 Hz)       | yes    |
+| `lockin/cmd`      | dashboard    | orchestrator | `{type: button\|settings, ...}`  | no     |
+
+`lockin/snapshot` is published **retained** so a dashboard (or page reload)
+that connects mid-session immediately receives the current state instead of
+waiting for the next publish.
+
 ## 6. Module map (Pi)
 
-| Module             | Responsibility                                                       |
-|--------------------|----------------------------------------------------------------------|
-| `config.py`        | Load env vars into a frozen `Config` dataclass; derive paths.        |
-| `database.py`      | SQLite wrapper, schema, all queries. Thread-safe via single lock.    |
-| `serial_reader.py` | Async serial reader/writer with auto-reconnect on EOF.               |
-| `camera_client.py` | Async HTTP client for `/capture`.                                    |
-| `vision_judge.py`  | Gemini call + strict JSON parser.                                    |
-| `fsm.py`           | `FocusFsm` — pure state machine, no I/O.                             |
-| `orchestrator.py`  | Wires all of the above into asyncio tasks; owns the FSM instance.    |
-| `main.py`          | Entry point. Sets up logging, signals, snapshot writer.              |
-| `dashboard/app.py` | Flask — read-only over `snapshot.json` + SQLite; writes `cmd.json`.  |
+| Module                    | Responsibility                                                       |
+|---------------------------|----------------------------------------------------------------------|
+| `config.py`               | Load env vars into a frozen `Config` dataclass; derive paths.        |
+| `database.py`             | SQLite wrapper, schema, all queries. Thread-safe via single lock.    |
+| `serial_reader.py`        | Async serial reader/writer with auto-reconnect on EOF.               |
+| `camera_client.py`        | Async HTTP client for `/capture`.                                    |
+| `vision_judge.py`         | Gemini call + strict JSON parser.                                    |
+| `fsm.py`                  | `FocusFsm` — pure state machine, no I/O.                             |
+| `mqtt_bus.py`             | Async MQTT pub/sub with auto-reconnect; orchestrator's bus.          |
+| `sd_notify.py`            | Dependency-free sd_notify client (READY/WATCHDOG/STOPPING).          |
+| `orchestrator.py`         | Wires all of the above into asyncio tasks; owns the FSM instance.    |
+| `main.py`                 | Entry point. Sets up logging, signals, file-fallback snapshot writer.|
+| `dashboard/app.py`        | Flask — MQTT-cached snapshot + SSE stream; publishes commands.       |
+| `dashboard/mqtt_bridge.py`| paho-mqtt subscriber thread; caches snapshot, fans out to SSE.       |
 
 Every I/O module degrades gracefully: a missing dependency or a network
 fault logs once and returns `None` / `False`. The FSM never crashes the

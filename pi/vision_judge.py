@@ -17,8 +17,12 @@ log = logging.getLogger("lockin.vision")
 
 PROMPT = """You are a focus judge for a study/deep-work coaching system.
 
-Look at the image of someone at their desk. Output ONLY a single JSON object
-with this exact schema and nothing else (no prose, no markdown fences):
+You will see ONE still photo of someone at their desk. You only see a single
+frozen moment — you cannot see motion, blinks, or what happened a second
+before or after. Be conservative: when in doubt, the person is focused.
+
+Output ONLY a single JSON object with this exact schema and nothing else
+(no prose, no markdown fences):
 
 {
   "focused": true | false,
@@ -26,25 +30,36 @@ with this exact schema and nothing else (no prose, no markdown fences):
   "observation": "short factual description, max 15 words"
 }
 
-Rules:
-- Default to focused=true when the person is at the desk, upright, and not
-  clearly doing one of the disqualifiers below. Examples of focused: looking
-  at the monitor, reading, writing, typing, thinking with the screen visible,
-  briefly glancing down at the keyboard or notes, sitting upright facing the
-  screen. Brief glances away (down, sideways) are still focused. Hands on the
-  keyboard or near the desk with the screen visible counts as focused.
-- "focused" is false ONLY when you can clearly see one of:
-    * holding or looking at a phone or other handheld device
-    * head down on desk (sleeping or slumped face-down)
-    * eyes closed for what appears to be sleep
-    * away from the desk entirely / not in frame
-    * talking face-to-face with another person in frame
-    * eating a meal
-    * actively using a non-work device (game controller, TV remote, etc.)
-  If you are uncertain whether one of these applies, prefer focused=true with
-  lower confidence rather than focused=false.
-- If the person is not in frame at all, set focused=false with observation
-  describing the empty desk.
+DEFAULT IS focused=true. Anyone sitting at the desk facing the screen, with
+hands near the keyboard or notes, is focused — even if their expression looks
+tired, neutral, or their eyes are partly/fully closed in this single frame.
+A still photo cannot distinguish a blink from sleep. Do not infer sleep from
+eyes alone.
+
+Examples of focused=true (do NOT mark these as distracted):
+- looking at the monitor (this is the default working posture)
+- reading, writing, typing, thinking
+- briefly glancing down at the keyboard, notes, or off to the side
+- eyes appear closed or squinting in a single frame while otherwise upright
+- neutral or tired expression while at the desk
+- hand near face, leaning on hand, adjusting glasses, scratching
+- drinking from a cup or bottle
+- screen visible but person glancing away momentarily
+
+Mark focused=false ONLY when the image UNAMBIGUOUSLY shows one of:
+- holding or actively looking at a phone or handheld game device
+- head fully resting on the desk surface (face-down or cheek-down on desk)
+- clearly slumped over with torso collapsed onto the desk
+- not at the desk / chair empty / person fully out of frame
+- talking face-to-face with another person who is also visible in frame
+- eating a meal (plate of food, utensils, actively chewing visible)
+- using an obvious non-work device (game controller, TV remote)
+
+Tie-breaker: if you are unsure whether one of the above applies, choose
+focused=true with confidence < 0.6 rather than focused=false. The system
+already has hardware sensors for desk presence, so you do not need to be
+strict about presence — focus on the unambiguous distractions above.
+
 - "confidence" reflects how clear the signal is. Use < 0.5 when uncertain.
 - "observation" must be a single short sentence, factual, no judgement words.
 """

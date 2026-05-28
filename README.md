@@ -31,16 +31,24 @@ flowchart LR
     Uno <-->|"USB serial · JSON"| Pi
     Mac["mac_camera_server.py"] <-->|"HTTP /capture"| Pi
     Pi <-->|HTTPS| Gemini[(Gemini 2.5 Flash)]
-    Browser([Browser]) -->|"HTTP :8080"| Pi
+    Browser([Browser]) <-->|"HTTP :8080 + SSE"| Pi
     subgraph Pi[Raspberry Pi 5]
         orch[orchestrator.py + FSM]
         dash[Flask dashboard]
+        broker[(mosquitto MQTT)]
         db[(SQLite)]
         orch --- db
         dash --- db
-        orch -."snapshot.json/cmd.json".- dash
+        orch <-->|"MQTT pub/sub"| broker
+        broker <--> dash
     end
 ```
+
+Three communication protocols are in play: **UART** (Arduino↔Pi, 115200 baud
+JSON), **HTTP/HTTPS** (Pi↔Mac webcam, Pi↔Gemini, browser↔dashboard), and
+**MQTT** (orchestrator↔dashboard via a local mosquitto broker). The dashboard
+pushes state to the browser over **Server-Sent Events**, so the UI reflects a
+state change in well under a second instead of waiting for a poll.
 
 ## Repository layout
 
@@ -55,12 +63,18 @@ pi/                            - Python orchestrator + Flask dashboard
   camera_client.py             - async camera client (HTTP /capture endpoint)
   vision_judge.py              - Gemini multimodal judge
   fsm.py                       - finite state machine (pure logic)
+  mqtt_bus.py                  - async MQTT pub/sub (orchestrator side)
+  sd_notify.py                 - systemd watchdog/ready notifier (no deps)
   orchestrator.py              - wires everything together
   main.py                      - entry point
   run.sh                       - launch orchestrator + dashboard together
   dashboard/                   - Flask app + Jinja templates + CSS
+    mqtt_bridge.py             - MQTT subscriber + SSE fan-out (dashboard side)
   systemd/                     - service unit files
   test_fsm.py                  - FSM smoke tests (no hardware)
+  test_vision_judge.py         - Gemini JSON parser tests
+  test_serial_reader.py        - serial reconnect / overflow tests
+  test_mqtt_integration.py     - live MQTT round-trip tests
 docs/                          - architecture, FSM, circuit, setup
 ```
 
@@ -69,12 +83,16 @@ docs/                          - architecture, FSM, circuit, setup
 The Arduino streams a 1 Hz JSON sensor frame (PIR, ultrasonic, DHT22, LDR) over
 USB serial, and pushes button events (single / double / long press) and PIR
 triggers as they happen. The Mac webcam server serves a fresh JPEG on
-`/capture` whenever the Pi asks. The Pi's `orchestrator.py` runs four asyncio
-tasks — serial reader, vision loop, FSM tick loop, image retention — that all
+`/capture` whenever the Pi asks. The Pi's `orchestrator.py` runs eight asyncio
+tasks — serial reader, serial consumer, FSM tick loop, vision loop, image
+retention, MQTT bus, snapshot publisher, and systemd watchdog — that all
 share a single `FocusFsm` instance. The FSM owns transitions between
 `AWAY → IDLE → FOCUS → DEGRADING → BREAK` with hysteresis on every edge. A
-separate Flask app serves a small dashboard from the same SQLite database,
-reading a JSON snapshot the orchestrator writes once a second.
+separate Flask app serves a small dashboard from the same SQLite database; it
+subscribes to the orchestrator's MQTT snapshot topic and pushes updates to the
+browser over Server-Sent Events. If the broker is down, both sides fall back
+to the on-disk `snapshot.json` / `cmd.json` files, so the dashboard keeps
+working.
 
 ## Quick start (on the Pi)
 
@@ -85,12 +103,16 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
+# MQTT broker (orchestrator ↔ dashboard transport)
+sudo apt install -y mosquitto mosquitto-clients
+sudo systemctl enable --now mosquitto
+
 cp .env.example .env
 # fill in GEMINI_API_KEY and the camera URL
 $EDITOR .env
 
-# smoke-test the FSM (no hardware needed)
-python -m unittest test_fsm.py
+# smoke-test everything that needs no hardware
+python -m unittest discover -p 'test_*.py'
 
 # run orchestrator + dashboard together
 ./run.sh
@@ -151,17 +173,27 @@ All five failure paths from the project plan are implemented:
 | Gemini returns invalid JSON     | parser returns `None`           | discard judgment; log; try again next cycle  |
 | Gemini call too slow            | `asyncio.wait_for` timeout      | skip cycle                                   |
 | Pi power loss mid-session       | startup sweep marks orphans     | session row marked incomplete; no data loss  |
+| MQTT broker down                | publish/connect failure         | fall back to `snapshot.json` / `cmd.json`    |
+| Orchestrator hangs (deadlock)   | systemd watchdog (missed feeds) | killed + restarted after 120 s               |
 
-systemd `Restart=always` plus `WatchdogSec=120` on the orchestrator catches
-any unhandled crash.
+systemd `Restart=always` plus a real `Type=notify` watchdog (`WATCHDOG=1` fed
+every 30 s, `WatchdogSec=120`) on the orchestrator catches both crashes and
+silent hangs.
 
 ## Tests
 
 ```bash
 cd pi
-python -m unittest test_fsm.py
+python -m unittest discover -p 'test_*.py'
 ```
 
-Thirteen assertions covering every FSM transition, hysteresis hold time, and
-button gesture. No hardware required. See [`docs/fsm.md`](docs/fsm.md) for the
-full state diagram and the list of tests.
+| Suite                       | Coverage                                                      |
+|-----------------------------|--------------------------------------------------------------|
+| `test_fsm.py`               | Every FSM transition, hysteresis hold, button gesture (13)   |
+| `test_vision_judge.py`      | Gemini JSON parser: fences, prose, truncation, bad types (25)|
+| `test_serial_reader.py`     | Auto-reconnect on EOF, queue-overflow drop, parse errors (9) |
+| `test_mqtt_integration.py`  | Live pub/sub round-trip orchestrator↔dashboard (4)*          |
+
+*Integration tests skip automatically if no broker is on `127.0.0.1:1883`.
+None of the suites need hardware. See [`docs/fsm.md`](docs/fsm.md) for the full
+state diagram.

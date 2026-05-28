@@ -19,6 +19,18 @@ Arduino Uno frontend and a Mac webcam server.
 sudo apt update && sudo apt install -y python3-venv python3-pip git
 sudo usermod -a -G dialout "$USER"
 # log out and back in for the group change to take effect
+
+# MQTT broker — orchestrator <-> dashboard transport
+sudo apt install -y mosquitto mosquitto-clients
+sudo systemctl enable --now mosquitto
+```
+
+The stock mosquitto config listens anonymously on `127.0.0.1:1883`, which is
+all this project needs (both publishers are on the Pi). Verify it works:
+
+```bash
+mosquitto_sub -t 'lockin/#' -v &   # watch all lockin topics
+mosquitto_pub -t 'lockin/test' -m hi
 ```
 
 ## 2. Clone and install
@@ -118,12 +130,34 @@ sudo journalctl -fu lockin-orchestrator
 
 For the marker demo:
 
-1. Run a session normally — show focus accumulating.
+1. Run a session normally — show focus accumulating, dashboard updating in
+   real time (the UI reacts within a second of a button press — that's the
+   MQTT + SSE path, not polling).
 2. Use phone deliberately — show DEGRADING state + image in dashboard.
-3. Unplug Arduino — dashboard shows "Arduino offline"; system holds state.
+3. Unplug Arduino — dashboard shows "Arduino offline"; system holds state;
+   `journalctl` shows the 5 s reconnect loop. Re-plug to show recovery.
 4. Stop the Mac webcam server — vision pauses, sensor logic continues.
-5. `sudo systemctl kill lockin-orchestrator` — watch systemd restart it
+5. Stop the broker (`sudo systemctl stop mosquitto`) — the dashboard keeps
+   working via the `snapshot.json` / `cmd.json` fallback (now at ~1–2 s
+   latency). Restart mosquitto to show real-time resume.
+6. `sudo systemctl kill lockin-orchestrator` — watch systemd restart it
    within `RestartSec=5`.
+7. Hard-hang test (optional): `sudo systemctl kill -s SIGSTOP lockin-orchestrator`
+   freezes the process without killing it. The watchdog feed stops, and after
+   `WatchdogSec=120` systemd force-restarts it — proving the watchdog catches
+   silent hangs, not just clean crashes.
 
-All five behaviours appear in `journalctl -fu lockin-orchestrator`
-during the demo.
+All behaviours appear in `journalctl -fu lockin-orchestrator` during the demo.
+
+### Quick health checks
+
+```bash
+# Is the orchestrator publishing snapshots?
+mosquitto_sub -t 'lockin/snapshot' -C 1
+
+# Did systemd register the watchdog?
+systemctl show lockin-orchestrator -p WatchdogTimestamp -p NRestarts
+
+# Is the SSE stream pushing to the browser?
+curl -N http://<pi-ip>:8080/api/stream   # prints `data: {...}` lines
+```

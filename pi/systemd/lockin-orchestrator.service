@@ -1,10 +1,18 @@
 [Unit]
-Description=Lock-In orchestrator (Arduino + ESP32-CAM + Gemini + FSM)
-After=network-online.target
+Description=Lock-In orchestrator (Arduino + Mac webcam + Gemini + FSM)
+After=network-online.target mosquitto.service
 Wants=network-online.target
+# mosquitto is not required (file-based snapshot/cmd fallback exists), but
+# should start first when present so the orchestrator's first MQTT publish
+# is delivered to a running broker.
 
 [Service]
-Type=simple
+# Type=notify lets the orchestrator tell systemd "READY=1" only once the
+# FSM, DB, serial reader and MQTT bus are up. WatchdogSec=120 is paired
+# with a 30s WATCHDOG=1 feed inside _watchdog_loop, so a fully hung
+# process (3 missed feeds) gets killed and restarted.
+Type=notify
+NotifyAccess=main
 User=pi
 Group=pi
 WorkingDirectory=/home/pi/lock-in/pi

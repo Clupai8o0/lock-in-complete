@@ -1,17 +1,32 @@
-"""Flask dashboard. Read-only view over snapshot.json + SQLite."""
+"""Flask dashboard.
+
+Real-time updates: subscribes to MQTT `lockin/snapshot` and pushes them to
+the browser via Server-Sent Events on `/api/stream`. When the broker is
+offline, browsers fall back to polling `/api/snapshot` which reads from
+`snapshot.json` written by the orchestrator (graceful degradation).
+
+Button + settings POSTs publish to `lockin/cmd`. If publish fails (broker
+down) we fall back to writing `cmd.json`, which the orchestrator polls at
+1Hz.
+"""
 from __future__ import annotations
 
 import json
+import logging
+import queue
 import sys
 from pathlib import Path
 
-from flask import Flask, abort, jsonify, render_template, request, send_file
+from flask import Flask, Response, abort, jsonify, render_template, request, send_file
 
 # allow `python dashboard/app.py` from the pi/ dir
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import config  # noqa: E402
 from database import Database  # noqa: E402
+from mqtt_bridge import MqttBridge  # noqa: E402
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 CFG = config.load()
 DB = Database(CFG.db_path)
@@ -27,10 +42,17 @@ SETTINGS_KEYS = (
     "target_pomodoros",
 )
 
+BRIDGE = MqttBridge(
+    CFG.mqtt_host, CFG.mqtt_port,
+    topic_snapshot=CFG.mqtt_topic_snapshot,
+    topic_cmd=CFG.mqtt_topic_cmd,
+)
+BRIDGE.start()
+
 app = Flask(__name__)
 
 
-def _load_snapshot() -> dict:
+def _load_snapshot_from_file() -> dict:
     try:
         return json.loads(SNAPSHOT_PATH.read_text())
     except (OSError, json.JSONDecodeError):
@@ -45,6 +67,12 @@ def _load_snapshot() -> dict:
             "camera_online": False,
             "vision_enabled": False,
         }
+
+
+def _current_snapshot() -> dict:
+    """Prefer the MQTT-cached snapshot (sub-second fresh). Fall back to
+    the on-disk snapshot when the broker is unreachable."""
+    return BRIDGE.latest_snapshot or _load_snapshot_from_file()
 
 
 def _fmt_duration(seconds: int | None) -> str:
@@ -65,8 +93,7 @@ app.jinja_env.filters["duration"] = _fmt_duration
 
 @app.route("/")
 def index():
-    snap = _load_snapshot()
-    return render_template("today.html", snap=snap)
+    return render_template("today.html", snap=_current_snapshot())
 
 
 @app.route("/history")
@@ -117,7 +144,6 @@ def image(name: str):
 
 @app.route("/settings")
 def settings():
-    snap = _load_snapshot()
     cfg_view = {
         "vision_interval_s": CFG.vision_interval_s,
         "focus_confirm_s": CFG.focus_confirm_s,
@@ -128,13 +154,50 @@ def settings():
         "image_retention_days": CFG.image_retention_days,
         "camera_url": CFG.camera_url,
         "gemini_model": CFG.gemini_model,
+        "mqtt_host": CFG.mqtt_host,
+        "mqtt_port": CFG.mqtt_port,
+        "mqtt_connected": BRIDGE.connected,
     }
-    return render_template("settings.html", snap=snap, cfg=cfg_view)
+    return render_template("settings.html", snap=_current_snapshot(), cfg=cfg_view)
 
 
 @app.route("/api/snapshot")
 def api_snapshot():
-    return jsonify(_load_snapshot())
+    """Polling fallback (kept for compatibility). Browsers should prefer
+    /api/stream which pushes updates as they arrive."""
+    return jsonify(_current_snapshot())
+
+
+@app.route("/api/stream")
+def api_stream():
+    """SSE endpoint. Sends the cached snapshot immediately on connect,
+    then a `data:` event every time the orchestrator publishes a new one
+    (typically every 500ms, or instantly on a state change).
+
+    Sends a `: keepalive` comment every 15s so proxies don't drop idle
+    connections."""
+    q: queue.Queue = queue.Queue(maxsize=4)
+    BRIDGE.add_listener(q)
+
+    def gen():
+        try:
+            while True:
+                try:
+                    snap = q.get(timeout=15.0)
+                    yield "data: " + json.dumps(snap) + "\n\n"
+                except queue.Empty:
+                    yield ": keepalive\n\n"
+        finally:
+            BRIDGE.remove_listener(q)
+
+    return Response(
+        gen(),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",  # disable proxy buffering
+        },
+    )
 
 
 @app.route("/api/sessions")
@@ -180,7 +243,7 @@ def api_button():
     action = data.get("action", "single")
     if action not in ("single", "double", "long"):
         return jsonify({"error": "invalid action"}), 400
-    return _write_command({"type": "button", "action": action})
+    return _send_command({"type": "button", "action": action})
 
 
 @app.route("/api/settings", methods=["POST"])
@@ -196,16 +259,21 @@ def api_settings_update():
             pass
     if not payload:
         return jsonify({"error": "no valid settings"}), 400
-    return _write_command({"type": "settings", **payload})
+    return _send_command({"type": "settings", **payload})
 
 
-def _write_command(cmd: dict):
+def _send_command(cmd: dict):
+    """MQTT-first command path. On broker outage, write the legacy
+    cmd.json so the orchestrator's 1Hz file poller still picks it up."""
+    if BRIDGE.connected and BRIDGE.publish_command(cmd):
+        return jsonify({"ok": True, "via": "mqtt"})
     try:
         CMD_PATH.write_text(json.dumps(cmd))
     except OSError as e:
         return jsonify({"error": str(e)}), 500
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "via": "file"})
 
 
 if __name__ == "__main__":
-    app.run(host=CFG.dashboard_host, port=CFG.dashboard_port)
+    # threaded=True so the SSE streaming endpoint doesn't block other requests
+    app.run(host=CFG.dashboard_host, port=CFG.dashboard_port, threaded=True)
