@@ -173,7 +173,11 @@ function render(s) {
     }
     if (s.pomodoro_duration_s) {
       pomoDuration = s.pomodoro_duration_s;
-      document.getElementById('pomo-mins').value = Math.round(s.pomodoro_duration_s / 60);
+      // Don't clobber the field while the user is editing it.
+      const inp = document.getElementById('pomo-mins');
+      if (document.activeElement !== inp) {
+        inp.value = Math.round(s.pomodoro_duration_s / 60);
+      }
     }
 
     set('sys-arduino', s.serial_connected ? 'on' : 'off', s.serial_connected ? 'ok' : 'err');
