@@ -1,5 +1,27 @@
 {% extends "base.html" %}
 {% block title %}Today &middot; Lock-In{% endblock %}
+
+{% block sidebar_extras %}
+<div class="side-block">
+  <div class="side-label">System</div>
+  <ul class="kv kv-compact">
+    <li><span>Arduino</span><b id="sys-arduino" class="{{ 'ok' if snap.serial_connected else 'err' }}">{{ 'on' if snap.serial_connected else 'off' }}</b></li>
+    <li><span>Camera</span><b id="sys-camera" class="{{ 'ok' if snap.camera_online else 'warn' }}">{{ 'on' if snap.camera_online else 'off' }}</b></li>
+    <li><span>Vision</span><b id="sys-vision" class="{{ 'ok' if snap.vision_enabled else 'warn' }}">{{ 'on' if snap.vision_enabled else 'off' }}</b></li>
+  </ul>
+</div>
+<div class="side-block">
+  <div class="side-label">Environment</div>
+  {% set env = snap.last_environment %}
+  <ul class="kv kv-compact">
+    <li><span>Temp</span><b id="env-temp">{{ '%.1f' % env.temp_c ~ '°' if env and env.temp_c is not none else '-' }}</b></li>
+    <li><span>Humidity</span><b id="env-hum">{{ '%.0f' % env.humidity ~ '%' if env and env.humidity is not none else '-' }}</b></li>
+    <li><span>Light</span><b id="env-light">{{ env.light if env and env.light is not none else '-' }}</b></li>
+    <li><span>Distance</span><b id="env-dist">{{ '%.0f' % snap.last_distance_cm ~ ' cm' if snap.last_distance_cm else '-' }}</b></li>
+  </ul>
+</div>
+{% endblock %}
+
 {% block content %}
 <section class="focus-stage">
   <div class="timer-card">
@@ -59,9 +81,8 @@
   </aside>
 </section>
 
-<section class="grid">
+<section class="action-row">
   <div class="card controls">
-    <h3>Pomodoro</h3>
     <div class="btn-row">
       <button class="ctrl-btn ctrl-start" onclick="btn('single')">Start</button>
       <button class="ctrl-btn ctrl-break" onclick="btn('double')">Break</button>
@@ -76,37 +97,17 @@
     </div>
   </div>
 
-  <div class="card">
-    <h3>System</h3>
-    <ul class="kv">
-      <li><span>Arduino</span><b id="sys-arduino" class="{{ 'ok' if snap.serial_connected else 'err' }}">{{ 'connected' if snap.serial_connected else 'offline' }}</b></li>
-      <li><span>Camera</span><b id="sys-camera" class="{{ 'ok' if snap.camera_online else 'warn' }}">{{ 'online' if snap.camera_online else 'offline' }}</b></li>
-      <li><span>Vision</span><b id="sys-vision" class="{{ 'ok' if snap.vision_enabled else 'warn' }}">{{ 'enabled' if snap.vision_enabled else 'disabled' }}</b></li>
-    </ul>
+  <div class="card obs-card">
+    <div class="side-label">Vision</div>
+    <p class="obs" id="obs">{{ snap.last_observation or 'No vision check yet.' }}</p>
+    <p class="meta" id="vision-meta">
+      {% if snap.last_vision_confidence is not none %}
+        confidence <b id="vision-conf">{{ '%.0f' % (snap.last_vision_confidence * 100) }}%</b>
+        &middot;
+        <b id="vision-judged" class="{{ 'ok' if snap.last_vision_focused else 'warn' }}">{{ 'focused' if snap.last_vision_focused else 'not focused' }}</b>
+      {% endif %}
+    </p>
   </div>
-
-  <div class="card">
-    <h3>Environment</h3>
-    {% set env = snap.last_environment %}
-    <ul class="kv">
-      <li><span>Temperature</span><b id="env-temp">{{ '%.1f' % env.temp_c ~ ' °C' if env and env.temp_c is not none else '-' }}</b></li>
-      <li><span>Humidity</span><b id="env-hum">{{ '%.0f' % env.humidity ~ ' %' if env and env.humidity is not none else '-' }}</b></li>
-      <li><span>Light</span><b id="env-light">{{ env.light if env and env.light is not none else '-' }}</b></li>
-      <li><span>Desk distance</span><b id="env-dist">{{ '%.0f' % snap.last_distance_cm ~ ' cm' if snap.last_distance_cm else '-' }}</b></li>
-    </ul>
-  </div>
-</section>
-
-<section class="card wide">
-  <h3>Latest vision observation</h3>
-  <p class="obs" id="obs">{{ snap.last_observation or 'No vision check yet.' }}</p>
-  <p class="meta" id="vision-meta">
-    {% if snap.last_vision_confidence is not none %}
-      confidence <b id="vision-conf">{{ '%.0f' % (snap.last_vision_confidence * 100) }}%</b>
-      &middot; judged
-      <b id="vision-judged" class="{{ 'ok' if snap.last_vision_focused else 'warn' }}">{{ 'focused' if snap.last_vision_focused else 'not focused' }}</b>
-    {% endif %}
-  </p>
 </section>
 
 <script>
@@ -179,13 +180,13 @@ async function refresh() {
       document.getElementById('pomo-mins').value = Math.round(s.pomodoro_duration_s / 60);
     }
 
-    set('sys-arduino', s.serial_connected ? 'connected' : 'offline', s.serial_connected ? 'ok' : 'err');
-    set('sys-camera',  s.camera_online   ? 'online'    : 'offline', s.camera_online   ? 'ok' : 'warn');
-    set('sys-vision',  s.vision_enabled  ? 'enabled'   : 'disabled', s.vision_enabled  ? 'ok' : 'warn');
+    set('sys-arduino', s.serial_connected ? 'on' : 'off', s.serial_connected ? 'ok' : 'err');
+    set('sys-camera',  s.camera_online   ? 'on' : 'off', s.camera_online   ? 'ok' : 'warn');
+    set('sys-vision',  s.vision_enabled  ? 'on' : 'off', s.vision_enabled  ? 'ok' : 'warn');
 
     const env = s.last_environment || {};
-    document.getElementById('env-temp').textContent  = env.temp_c    != null ? env.temp_c.toFixed(1) + ' °C' : '-';
-    document.getElementById('env-hum').textContent   = env.humidity  != null ? Math.round(env.humidity) + ' %' : '-';
+    document.getElementById('env-temp').textContent  = env.temp_c    != null ? env.temp_c.toFixed(1) + '°' : '-';
+    document.getElementById('env-hum').textContent   = env.humidity  != null ? Math.round(env.humidity) + '%' : '-';
     document.getElementById('env-light').textContent = env.light     != null ? env.light : '-';
     document.getElementById('env-dist').textContent  = s.last_distance_cm != null ? Math.round(s.last_distance_cm) + ' cm' : '-';
 

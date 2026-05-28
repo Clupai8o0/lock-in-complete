@@ -10,6 +10,12 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body class="bean-state-{{ (snap.state if snap is defined and snap and snap.state else 'idle')|lower }}">
+  <script>
+    // Restore sidebar state before paint to avoid a layout flash.
+    if (localStorage.getItem('lockin:sidebar-collapsed') === '1') {
+      document.body.classList.add('is-sidebar-collapsed');
+    }
+  </script>
 
   {# Shared gradient defs — referenced by all .mascot SVGs on the page #}
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -41,42 +47,50 @@
     </defs>
   </svg>
 
-  <header>
-    <a class="brand" href="/">
-      <span class="mascot-wrap mascot-sm" aria-hidden="true">
-        {% include "_bean.html" %}
-      </span>
-      Lock-In
-    </a>
-    <div class="header-right">
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand-row">
+        <a class="brand" href="/">
+          <span class="mascot-wrap mascot-sm" aria-hidden="true">
+            {% include "_bean.html" %}
+          </span>
+          <span class="brand-text">Lock-In</span>
+        </a>
+        <button type="button" class="fs-btn" id="fs-btn" aria-label="Toggle fullscreen" title="Fullscreen">
+          <svg class="fs-icon fs-icon-enter" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"
+                  fill="none" stroke="currentColor" stroke-width="2.2"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <svg class="fs-icon fs-icon-exit" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"
+                  fill="none" stroke="currentColor" stroke-width="2.2"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </div>
+
       <nav>
         <a href="/"             class="{{ 'active' if request.endpoint == 'index' }}">Today</a>
         <a href="/history"      class="{{ 'active' if request.endpoint == 'history' }}">History</a>
         <a href="/distractions" class="{{ 'active' if request.endpoint == 'distractions' }}">Distractions</a>
         <a href="/settings"     class="{{ 'active' if request.endpoint == 'settings' }}">Settings</a>
       </nav>
-      <button type="button" class="fs-btn" id="fs-btn" aria-label="Toggle fullscreen" title="Fullscreen">
-        <svg class="fs-icon fs-icon-enter" viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"
-                fill="none" stroke="currentColor" stroke-width="2.2"
-                stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-        <svg class="fs-icon fs-icon-exit" viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"
-                fill="none" stroke="currentColor" stroke-width="2.2"
-                stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-      </button>
-    </div>
-  </header>
 
-  <main>
-    {% block content %}{% endblock %}
-  </main>
+      {% block sidebar_extras %}{% endblock %}
+    </aside>
 
-  <footer>
-    Lock-In &middot; SIT210 &middot; built on existing kit
-  </footer>
+    <button type="button" class="sidebar-toggle" id="sidebar-toggle" aria-label="Toggle sidebar" title="Toggle sidebar">
+      <svg class="chev" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M15 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2.4"
+              stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </button>
+
+    <main>
+      {% block content %}{% endblock %}
+    </main>
+  </div>
 
   <script>
     // Reflect dashboard state on <body> so the bean's CSS picks the right expression.
@@ -86,30 +100,18 @@
       [...body.classList].filter(c => c.startsWith('bean-state-')).forEach(c => body.classList.remove(c));
       body.classList.add(cls);
     };
-    // Hide the header when scrolling down, reveal when scrolling up.
+    // Sidebar collapse toggle — persisted across reloads.
     (function () {
-      const header = document.querySelector('header');
-      if (!header) return;
-      const scroller = document.scrollingElement || document.documentElement;
-      let lastY = scroller.scrollTop;
-      let ticking = false;
-      const THRESHOLD = 8;
-      function update() {
-        const y = scroller.scrollTop;
-        const dy = y - lastY;
-        if (y <= 4) {
-          header.classList.remove('is-hidden');
-        } else if (dy > THRESHOLD) {
-          header.classList.add('is-hidden');
-        } else if (dy < -THRESHOLD) {
-          header.classList.remove('is-hidden');
-        }
-        if (Math.abs(dy) > THRESHOLD) lastY = y;
-        ticking = false;
+      const btn = document.getElementById('sidebar-toggle');
+      if (!btn) return;
+      const KEY = 'lockin:sidebar-collapsed';
+      if (localStorage.getItem(KEY) === '1') {
+        document.body.classList.add('is-sidebar-collapsed');
       }
-      window.addEventListener('scroll', () => {
-        if (!ticking) { requestAnimationFrame(update); ticking = true; }
-      }, { passive: true });
+      btn.addEventListener('click', () => {
+        const collapsed = document.body.classList.toggle('is-sidebar-collapsed');
+        localStorage.setItem(KEY, collapsed ? '1' : '0');
+      });
     })();
 
     // Fullscreen toggle — drops the browser chrome so the 5" DSI display has room to breathe.
